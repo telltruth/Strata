@@ -68,7 +68,16 @@ The generated JSON uses parallel=8, an uncapped thinking budget, KV int8 with ho
 
 Point Strata server at this JSON file using the normal configuration invocation. Never expose the server beyond loopback without an API key. Each Qwen Code client must send reasoning_effort=xhigh; the model template also defaults to xhigh if absent. This project does not secretly replace xhigh with low/medium. Note that an existing client setting can explicitly override thinking.
 
-Start the server and inspect the startup INFO batch_slots=N (it may grant fewer than eight) and /v1/status. Do not mistake eight connected Qwen Code processes for eight simultaneous active slots.
+Start the server and inspect the startup INFO batch_slots=N. Verify the *actual*
+server allocation (exit nonzero if the server quietly reduced slots or context):
+
+~~~sh
+python3 gh200/verify_server.py --url http://127.0.0.1:8080 --slots 8 --context 262144
+~~~
+
+This checks /v1/status concurrency.serving and context.max_positions. Do not mistake
+eight connected Qwen Code processes for eight simultaneously allocated slots.
+Passing this check does **not** prove eight full 256K contexts fit in memory.
 
 ## Benchmark
 
