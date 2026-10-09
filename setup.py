@@ -60,6 +60,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 WIN = os.name == "nt"
+# Binary releases target x86-64, so Grace ARM64 builds from source.
+ARM = platform.machine().lower() in ("aarch64", "arm64")
+
+def arm_cpu_arch():
+    """Select ggml's CPU ISA from Linux ARM feature flags."""
+    features = set()
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("Features"):
+                    features.update(line.split(":", 1)[1].split())
+    except OSError:
+        pass
+    base = "armv8.6-a" if {"bf16", "i8mm"} <= features else "armv8.2-a"
+    suffix = [name for feature, name in (("asimddp", "dotprod"),
+              ("i8mm", "i8mm"), ("asimdhp", "fp16")) if feature in features]
+    return "+".join([base, *suffix])
+
 # #214: every Hugging Face file comes from a fixed commit of its repository (the `sha` of
 # https://huggingface.co/api/models/<repo> when this was pinned), so a checkout installs the same files on any
 # day.  A revision the repository no longer has falls back to its current files, with a message (download()).
@@ -612,7 +630,8 @@ def cpu_info():
     else:
         try:
             txt = open("/proc/cpuinfo").read()
-            flags = set(re.search(r"^flags\s*:\s*(.*)$", txt, re.M).group(1).split())
+            fl = re.search(r"^(?:flags|Features)\s*:\s*(.*)$", txt, re.M)
+            flags = set(fl.group(1).split()) if fl else set()
             avx2 = "avx2" in flags
             avx512 = {"avx512f", "avx512bw", "avx512vl", "avx512_vnni", "avx512vbmi"} <= flags
             m = re.search(r"^model name\s*:\s*(.*)$", txt, re.M)
@@ -2480,7 +2499,7 @@ def build_engine_hip(gpu, llama, vision="none") -> Path:
     src, vsrc = source_hash(ENGINE_SOURCES), source_hash(VISION_SOURCES)
     archs = sorted(set(gpu.get("archs") or [gpu["arch"]]))
     has_archs = set(archs) <= set(meta.get("archs", []))
-    floor = cpu_floor(cpu_info()[1])                     # "" on an AVX2 CPU: the normal engine
+    floor = "" if ARM else cpu_floor(cpu_info()[1])  # ARM has no x86 ISA floor
     engine_ok = meta.get("backend") == "hip" and (eng / EXE).exists() and meta.get("src") == src and has_archs and \
         (meta.get("isa_floor") or "") == floor
     vision_ok = vision == "none" or ((eng / VEXE).exists() and meta.get("vision_src") == vsrc)
@@ -3087,7 +3106,7 @@ def install_build_tools(gpu, yes):
                 fail("the CUDA Toolkit can be installed automatically on Ubuntu 22.04 / 24.04 only",
                      "install it from https://developer.nvidia.com/cuda-downloads and run it again")
             deb = Path("/tmp/cuda-keyring.deb")
-            download(f"https://developer.download.nvidia.com/compute/cuda/repos/ubuntu{ver}/x86_64/cuda-keyring_1.1-1_all.deb",
+            download(f"https://developer.download.nvidia.com/compute/cuda/repos/ubuntu{ver}/{'sbsa' if ARM else 'x86_64'}/cuda-keyring_1.1-1_all.deb",
                      deb, "CUDA repository key")
             run(["sudo", "dpkg", "-i", str(deb)])
             run(["sudo", "apt-get", "update"])
@@ -3221,13 +3240,16 @@ def build_engine(gpu, vision, yes, llama, toolkit=None) -> Path:
                     ["-DSTRATA_ENABLE_CUDA=ON", "-DSTRATA_BUILD_TESTS=OFF", f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}",
                      f"-DCMAKE_CUDA_COMPILER={nvcc}", *toolkit_root_defs(nvcc), f"-DSTRATA_GGML_DIR={llama}",
                      *engine_defs(archs, toolkit),
+                     *([f"-DGGML_CPU_ARM_ARCH={arm_cpu_arch()}"] if ARM else []),
                      *isa_floor_defs(floor, bdir, meta)],
                     vcvars, "build-strata-cuda12.bat" if t12 else "build-strata.bat")
         shutil.copy2(bdir / EXE, eng / EXE)
     if not vision_ok:
         say("  Compiling the image encoder" + (" with CUDA (10-20 minutes, once) ..." if vision == "gpu" else " ..."))
         defs = [f"-DLLAMA_DIR={llama}", f"-DSTRATA_VISION_CUDA={'ON' if vision == 'gpu' else 'OFF'}",
-                "-DSTRATA_PORTABLE=OFF"]                   # built here, for this PC: native, like the engine
+                "-DSTRATA_PORTABLE=OFF"]   # build for the local CPU
+        if ARM:
+            defs.append(f"-DGGML_CPU_ARM_ARCH={arm_cpu_arch()}")
         if vision == "gpu":
             defs += [f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}", f"-DCMAKE_CUDA_COMPILER={nvcc}",
                      *toolkit_root_defs(nvcc)]
@@ -4906,10 +4928,10 @@ def main() -> int:
         ok(line)
         if problem:
             warn(problem)
-    floor = cpu_floor(avx2)
+    floor = "" if ARM else cpu_floor(avx2)
     if floor == "unsupported":
         fail("this CPU has neither AVX2 nor SSE4.2; Strata needs at least SSE4.2 (Intel Nehalem, 2008, or newer)")
-    if not avx2:
+    if not avx2 and not ARM:
         # #394 #595 #623: the ready-made engine is AVX2; an older CPU gets one compiled here, whose CPU experts run on
         # ggml-cpu's kernels for this CPU.  Experimental: measured only on newer CPUs with the older path forced, and by
         # users on a few Xeons.  A warning, not a stop.
@@ -5223,7 +5245,7 @@ def main() -> int:
         gpu = hip_card(eng, gpu, amd)
         a.gpu = gpu["index"] if gpu["count"] > 1 else a.gpu
     else:
-        eng = None if a.build or hip else get_prebuilt(a.prebuilt, gpu, vision, **({"toolkit": 12} if cuda_tk == 12
+        eng = None if a.build or hip or ARM else get_prebuilt(a.prebuilt, gpu, vision, **({"toolkit": 12} if cuda_tk == 12
                                                                                     else {}))
     if eng is not None and not hip and json.loads((eng / "BUILD.json").read_text(encoding="utf-8")).get("source") != "local":
         pip_cuda_libs(cuda_tk)
