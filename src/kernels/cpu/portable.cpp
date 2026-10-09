@@ -90,6 +90,9 @@ void q2_0_gguf_rows_multi_avx2(const uint8_t*, size_t, int, const ActQ* const*, 
 }
 void s2_expert_scalar(const uint8_t*, const float*, float*, bool) { unsupported("the Q2_0 scalar oracle"); }
 void quantize_oracle_q8_0(const float*, int, ActQ&) { unsupported("x86-only Q8_0 oracle"); }
+void expert_oracle_q8_0(const uint8_t*, const ActQ&, float*, ExpertScratch&) {
+    unsupported("x86-only Q2_0 expert oracle");
+}
 
 bool iq512_supported(int) noexcept { return false; }
 void iq512_gu_rows(int, const uint8_t*, size_t, size_t, int, const void* const*, int, float* const*, int, int) {
