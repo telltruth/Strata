@@ -1,0 +1,45 @@
+name: GH200 ARM64 source smoke
+on:
+  push:
+    branches:
+      - feat/gh200-arm64-inference
+  pull_request:
+    paths:
+      - 'src/kernels/cpu/**'
+      - 'include/strata/**'
+      - 'setup.py'
+      - 'gh200/**'
+      - '.github/workflows/gh200-arm64.yml'
+jobs:
+  arm64-source:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Standalone ARM64 translation-unit compile
+        run: |
+          uname -m
+          c++ --version
+          c++ -std=c++17 -O2 -Wall -Wextra -Iinclude -c src/kernels/cpu/portable.cpp -o /tmp/strata-portable.o
+          c++ -std=c++17 -O2 -Wall -Wextra -Iinclude -c src/kernels/cpu/expert_layout.cpp -o /tmp/strata-layout.o
+      - name: Configure, build and link portable ARM CPU library
+        run: |
+          cmake -S . -B /tmp/strata-arm -G Ninja \
+            -DSTRATA_ENABLE_CUDA=OFF -DSTRATA_NATIVE_EXPERTS=OFF -DSTRATA_BUILD_TESTS=OFF
+          cmake --build /tmp/strata-arm --target strata_kernels_cpu -j 2
+          c++ -std=c++20 -Iinclude gh200/arm64_link_smoke.cpp \
+            /tmp/strata-arm/libstrata_kernels_cpu.a -pthread -o /tmp/strata-arm/link-smoke
+          /tmp/strata-arm/link-smoke
+      - name: GH200 profile tests and installer syntax
+        run: |
+          python3 -m py_compile setup.py gh200/configure.py gh200/benchmark.py
+          python3 -m unittest discover -s gh200 -p 'test_*.py' -v
+  x86-compatibility:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: x86 ISA dispatcher source smoke
+        run: |
+          c++ -std=c++17 -O2 -Wall -Wextra -Iinclude -c src/kernels/cpu/expert_layout.cpp -o /tmp/strata-layout-x86.o
+      - name: Profile generator tests
+        run: |
+          python3 -m unittest discover -s gh200 -p 'test_*.py' -v

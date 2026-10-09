@@ -2379,6 +2379,7 @@ int main(int argc, char** argv) {
     // The experimental older-CPU build (STRATA_ISA_FLOOR=avx|none, compiled on that PC; #394 #595 #623) has ggml-cpu
     // for that floor, so a native pack's experts run there on ggml-cpu (every AVX2 kernel is behind cpu_avx2_ok).
     const char* isa_floor = strata::kernels::cpu::isa_floor_build();
+#if defined(__x86_64__) || defined(_M_X64)
     if (!strata::kernels::cpu::cpu_avx2_ok() && isa_floor[0] == '\0') {
         std::fprintf(stderr, "strata generate: this CPU (%s) does not support AVX2 with FMA and F16C, which this engine's "
                              "CPU expert kernels need; Strata runs on Intel Haswell (2013), AMD Zen (2017) or newer. "
@@ -2403,6 +2404,7 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "strata generate: this is the older-CPU build (ggml-cpu for %s); this CPU has AVX2, "
                                  "and the normal build is faster on it\n", isa_floor);
     }
+#endif // x86-only ISA startup checks
 
     std::string err;
     if (!o.native_head_gguf.empty() && !o.stream_token) {
