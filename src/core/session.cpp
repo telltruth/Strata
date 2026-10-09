@@ -25,7 +25,7 @@
 #include "strata/platform/cpu_relax.hpp"
 #define STRATA_SPIN_PAUSE() strata_cpu_pause()
 #else
-#define STRATA_SPIN_PAUSE() ((void) 0)
+#define STRATA_SPIN_PAUSE() strata_cpu_pause()
 #endif
 
 namespace strata::core {

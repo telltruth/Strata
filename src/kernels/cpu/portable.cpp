@@ -42,19 +42,6 @@ inline float bf16f(uint16_t h) {
 
 }  // namespace
 
-const char* CpuFeatures::reason() const { return usable() ? "ok" : "not an x86 CPU (no AVX-512)"; }
-
-CpuFeatures cpu_features() { return CpuFeatures{}; }
-
-void cpu_require_expert_support() {
-    std::fprintf(stderr, "strata: the canonical Q2_0 pack's expert kernel needs AVX512-VNNI/VBMI (x86).\n"
-                         "        On this CPU, use a native GGUF pack (tools/iq_pack.py) instead.\n");
-    std::exit(1);
-}
-
-void expert_set_oracle_q8_0(bool enabled) { oracle_q8_0.store(enabled, std::memory_order_relaxed); }
-bool expert_oracle_q8_0_enabled() { return oracle_q8_0.load(std::memory_order_relaxed); }
-
 void act_quant_q8_1(const float* x, int n, ActQ& a) {
     // expert.cpp's scalar loop: round half away from zero, clamp to +-127.
     a.nchunks = n / QKA;
@@ -102,6 +89,7 @@ void q2_0_gguf_rows_multi_avx2(const uint8_t*, size_t, int, const ActQ* const*, 
     unsupported("the Q2_0 GGUF row kernel");
 }
 void s2_expert_scalar(const uint8_t*, const float*, float*, bool) { unsupported("the Q2_0 scalar oracle"); }
+void quantize_oracle_q8_0(const float*, int, ActQ&) { unsupported("x86-only Q8_0 oracle"); }
 
 bool iq512_supported(int) noexcept { return false; }
 void iq512_gu_rows(int, const uint8_t*, size_t, size_t, int, const void* const*, int, float* const*, int, int) {
@@ -111,6 +99,15 @@ void iq512_rows(int, const uint8_t*, size_t, int, const void* const*, int, float
     unsupported("the AVX-512 i-quant kernel");
 }
 bool iq256_supported(int) noexcept { return false; }
+int iq256_variant() noexcept { return 0; }
+int iq256_variants() noexcept { return 0; }
+void q8k_quant_avx2(const float*, void*, int64_t) { unsupported("x86-only Q8_K kernel"); }
+void iq256_gu_rows_v(int, int, const uint8_t*, size_t, size_t, int, const void* const*, int, float* const*, int, int) {
+    unsupported("x86-only IQ256 multi-token variant");
+}
+void iq256_rows_v(int, int, const uint8_t*, size_t, int, const void* const*, int, float* const*, int, int) {
+    unsupported("x86-only IQ256 multi-token variant");
+}
 void iq256_gu_rows(int, const uint8_t*, size_t, size_t, int, const void* const*, int, float* const*, int, int) {
     unsupported("the AVX-2 i-quant kernel");
 }
@@ -119,6 +116,9 @@ void iq256_rows(int, const uint8_t*, size_t, int, const void* const*, int, float
 }
 void iq4nl256_down_rows(const uint8_t*, size_t, int, const void* const*, int, float* const*, int, int) {
     unsupported("the AVX-2 IQ4_NL kernel");
+}
+void iq4nl256_down_rows_v(int, const uint8_t*, size_t, int, const void* const*, int, float* const*, int, int) {
+    unsupported("x86-only IQ4_NL multi-token variant");
 }
 bool kq256_supported(int) noexcept { return false; }
 void kq256_gu_rows(int, const uint8_t*, size_t, size_t, int, const void* const*, int, float* const*, int, int) {
